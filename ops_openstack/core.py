@@ -15,6 +15,8 @@ from ops.model import (
     WaitingStatus,
 )
 import charmhelpers.core.hookenv as hookenv
+# ch_context needed for bluestore validation
+import charmhelpers.contrib.openstack.context as ch_context
 import charmhelpers.contrib.openstack.utils as os_utils
 import logging
 
@@ -79,15 +81,14 @@ class OSBaseCharm(CharmBase):
     def custom_status_check(self):
         raise NotImplementedError
 
-    def update_status(self):
+    def update_status(self, custom_checks=None):
         logging.info("Updating status")
-        try:
+        custom_checks = custom_checks or []
+        for check in custom_checks:
             # Custom checks return True if the checked passed else False.
             # If the check failed the custom check will have set the status.
-            if not self.custom_status_check():
+            if not check():
                 return
-        except NotImplementedError:
-            pass
         if self._stored.series_upgrade:
             self.unit.status = BlockedStatus(
                 'Ready for do-release-upgrade and reboot. '
@@ -153,6 +154,41 @@ class OSBaseCharm(CharmBase):
             charm_func=None)
         self._stored.is_paused = False
         self.update_status()
+
+class BaseCephClientCharm(OSBaseCharm):
+
+    def check_bluestore(self):
+        try:
+            self.get_bluestore_compression()
+            return True
+        except ValueError as e:
+            self.unit.status = BlockedStatus(
+                'Invalid configuration: {}'.format(str(e)))
+            return False
+
+    def update_status(self, custom_checks=None):
+        custom_checks = custom_checks or []
+        super(BaseCephClientCharm, self).update_status(
+            custom_checks=custom_checks + [self.check_bluestore])
+
+    @staticmethod
+    def get_bluestore_compression():
+        """Get BlueStore Compression charm configuration if present.
+
+        :returns: Dictionary of options suitable for passing on as keyword
+                  arguments or None.
+        :rtype: Optional[Dict[str,any]]
+        :raises: ValueError
+        """
+        try:
+            bluestore_compression = (
+                ch_context.CephBlueStoreCompressionContext())
+            bluestore_compression.validate()
+        except KeyError:
+            # The charm does not have BlueStore Compression options defined
+            bluestore_compression = None
+        if bluestore_compression:
+            return bluestore_compression.get_kwargs()
 
 
 def charm_class(cls):
