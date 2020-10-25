@@ -4,6 +4,7 @@ stestr>=2.2.0
 mock>=1.2
 coverage>=3.6
 # Install netifaces as its a horrible charmhelpers lazy import
+psutil
 netifaces
 charmhelpers
 git+https://github.com/canonical/operator.git#egg=ops
