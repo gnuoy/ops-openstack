@@ -29,7 +29,23 @@ from ops.model import (
 import ops_openstack.core
 
 
-class OpenStackTestAPICharm(ops_openstack.core.OSBaseCharm):
+class OpenStackTestPlugin(ops_openstack.core.OSBaseCharm):
+
+    def plugin_status_check(self):
+        if self.model.config.get('plugin-check-fail', 'False') == 'True':
+            return BlockedStatus(
+                'Plugin Custom check failed')
+        else:
+            return ActiveStatus()
+
+    def update_status(self, custom_checks=None):
+        custom_checks = custom_checks or []
+        super().update_status(
+            custom_checks=custom_checks + [self.plugin_status_check])
+
+
+class OpenStackTestAPICharm(OpenStackTestPlugin,
+                            ops_openstack.core.OSBaseCharm):
 
     PACKAGES = ['keystone-common']
     REQUIRED_RELATIONS = ['shared-db']
@@ -40,11 +56,14 @@ class OpenStackTestAPICharm(ops_openstack.core.OSBaseCharm):
 
     def custom_status_check(self):
         if self.model.config.get('custom-check-fail', 'False') == 'True':
-            self.unit.status = MaintenanceStatus(
-                'Custom check failed')
-            return False
+            return MaintenanceStatus('Custom check failed')
         else:
-            return True
+            return ActiveStatus()
+
+    def update_status(self, custom_checks=None):
+        custom_checks = custom_checks or []
+        super().update_status(
+            custom_checks=custom_checks + [self.custom_status_check])
 
 
 class CharmTestCase(unittest.TestCase):
@@ -191,6 +210,21 @@ class TestOSBaseCharm(CharmTestCase):
         self.assertEqual(
             self.harness.charm.unit.status.message,
             'Missing relations: shared-db')
+        self.assertIsInstance(
+            self.harness.charm.unit.status,
+            BlockedStatus)
+
+    def test_update_status_plugin_check_fail(self):
+        self.harness.update_config(
+            key_values={
+                'plugin-check-fail': 'True'})
+        self.harness.add_relation('shared-db', 'mysql')
+        self.harness.begin()
+        self.harness.charm._stored.is_started = True
+        self.harness.charm.on.update_status.emit()
+        self.assertEqual(
+            self.harness.charm.unit.status.message,
+            'Plugin Custom check failed')
         self.assertIsInstance(
             self.harness.charm.unit.status,
             BlockedStatus)
